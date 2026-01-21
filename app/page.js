@@ -1,65 +1,227 @@
-import Image from "next/image";
+"use client";
+
+import { useState } from "react";
+import { Loader2, Upload, Bot, Car, PawPrint } from "lucide-react";
 
 export default function Home() {
+  const [file, setFile] = useState(null);
+  const [bricks, setBricks] = useState([]); // ✅ ARRAY
+  const [ideas, setIdeas] = useState([]);
+  const [selectedIdea, setSelectedIdea] = useState(null);
+  const [instructions, setInstructions] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const handleFileChange = (e) => {
+    if (e.target.files?.[0]) {
+      setFile(e.target.files[0]);
+      setBricks([]);
+      setIdeas([]);
+      setSelectedIdea(null);
+      setInstructions("");
+    }
+  };
+
+  const analyzeImage = async () => {
+    if (!file) return alert("Please select an image first");
+
+    setLoading(true);
+    setError(null);
+
+    const formData = new FormData();
+    formData.append("image", file);
+
+    try {
+      const res = await fetch("/api/analyze-image", {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!res.ok) throw new Error(await res.text());
+
+      const data = await res.json();
+      setBricks(Array.isArray(data.bricks) ? data.bricks : []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const generateIdeas = async () => {
+    if (bricks.length === 0) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/generate-ideas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          bricks: bricks.map(
+            (b) => `${b.name} (${b.color})`
+          ),
+        }),
+      });
+
+      if (!res.ok) throw new Error(await res.text());
+
+      const data = await res.json();
+      setIdeas(data.ideas || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getInstructions = async (idea) => {
+    setLoading(true);
+    setError(null);
+    setSelectedIdea(idea);
+
+    try {
+      const res = await fetch("/api/instructions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idea,
+          bricks: bricks.map(
+            (b) => `${b.name} (${b.color})`
+          ),
+        }),
+      });
+
+      if (!res.ok) throw new Error(await res.text());
+
+      const data = await res.json();
+      setInstructions(data.instructions || "");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <main className="max-w-4xl mx-auto p-6">
+      <h1 className="text-4xl font-bold mb-8 text-center">
+        BrickBuilder 🧱
+      </h1>
+
+      {/* Upload */}
+      <div className="bg-white shadow-md rounded-xl p-6 mb-8">
+        <h2 className="text-lg font-semibold mb-4">
+          1. Upload LEGO Photo
+        </h2>
+
+        <input
+          type="file"
+          accept="image/*"
+          onChange={handleFileChange}
+          className="block w-full text-sm text-gray-600
+            file:mr-4 file:py-2 file:px-4
+            file:rounded-full file:border-0
+            file:text-sm file:font-semibold
+            file:bg-purple-50 file:text-purple-700
+            hover:file:bg-purple-100"
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.js file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+
+        <button
+          onClick={analyzeImage}
+          disabled={!file || loading}
+          className="mt-4 inline-flex items-center px-6 py-2
+            bg-purple-600 text-white rounded-full
+            hover:bg-purple-700 disabled:opacity-50"
+        >
+          {loading ? (
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+          ) : (
+            <Upload className="mr-2 h-4 w-4" />
+          )}
+          Analyze Bricks
+        </button>
+      </div>
+
+      {/* Bricks */}
+      {bricks.length > 0 && (
+        <div className="bg-white shadow-md rounded-xl p-6 mb-8">
+          <h2 className="text-lg font-semibold mb-4">
+            Detected Bricks
+          </h2>
+
+          <ul className="space-y-2">
+            {bricks.map((brick, idx) => (
+              <li
+                key={idx}
+                className="flex justify-between bg-gray-100 px-4 py-2 rounded"
+              >
+                <span className="font-medium">
+                  {brick.name}
+                </span>
+                <span className="text-sm text-gray-600">
+                  {brick.color}
+                  {brick.productId ? ` • ${brick.productId}` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          <button
+            onClick={generateIdeas}
+            disabled={loading}
+            className="mt-4 px-6 py-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700"
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+            Generate Ideas
+          </button>
         </div>
-      </main>
-    </div>
+      )}
+
+      {/* Ideas */}
+      {ideas.length > 0 && (
+        <div className="bg-white shadow-md rounded-xl p-6 mb-8">
+          <h2 className="text-lg font-semibold mb-6">
+            Building Ideas
+          </h2>
+
+          <div className="grid gap-6 md:grid-cols-3">
+           {ideas.map((idea, idx) => (
+  <div key={idx} className="border rounded-xl p-4">
+    <h3 className="font-semibold mb-2 flex items-center">
+      {idx === 0 && <Bot className="mr-2" />}
+      {idx === 1 && <Car className="mr-2" />}
+      {idx === 2 && <PawPrint className="mr-2" />}
+      {idea.name}
+    </h3>
+
+    <button
+      onClick={() => getInstructions(idea)}
+      className="px-4 py-2 text-sm bg-gray-200 rounded-full"
+    >
+      Build This
+    </button>
+  </div>
+))}
+
+          </div>
+        </div>
+      )}
+
+      {/* Instructions */}
+      {instructions && (
+        <div className="bg-white shadow-md rounded-xl p-6">
+          <h2 className="text-lg font-semibold mb-4">
+      Instructions: {selectedIdea?.name}
+          </h2>
+
+          <pre className="bg-gray-100 p-6 rounded whitespace-pre-wrap leading-relaxed">
+            {instructions}
+          </pre>
+        </div>
+      )}
+
+      {error && <p className="text-red-600 mt-4">{error}</p>}
+    </main>
   );
 }
