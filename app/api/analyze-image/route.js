@@ -1,24 +1,31 @@
 import { openai } from "@/lib/openai";
 import { NextResponse } from "next/server";
+import sharp from "sharp";
 
 export async function POST(req) {
   try {
     const formData = await req.formData();
-    const image = formData.get("image");
+    const file = formData.get("image");
 
-    if (!image) {
+    if (!file) {
       return NextResponse.json(
         { error: "No image uploaded" },
         { status: 400 }
       );
     }
 
-    // Convert image → base64
-    const buffer = Buffer.from(await image.arrayBuffer());
-    const base64 = buffer.toString("base64");
-    const mimeType = image.type || "image/png";
+    // Convert to buffer
+    const inputBuffer = Buffer.from(await file.arrayBuffer());
 
-    // Call OpenAI Vision
+    // ✅ Normalize image (ANY format → JPEG)
+    const jpegBuffer = await sharp(inputBuffer)
+      .rotate() // fix orientation
+      .resize(1024, 1024, { fit: "inside" })
+      .jpeg({ quality: 85 })
+      .toBuffer();
+
+    const base64 = jpegBuffer.toString("base64");
+
     const response = await openai.responses.create({
       model: "gpt-4.1-mini",
       input: [
@@ -28,18 +35,12 @@ export async function POST(req) {
             {
               type: "input_text",
               text: `
-You are analyzing a photo of LEGO bricks.
+Identify all visible LEGO bricks.
 
-TASK:
-- Identify ALL visible unique LEGO brick types.
+Return ONLY valid JSON.
+Return an ARRAY.
 
-RETURN RULES:
-- Return ONLY raw JSON
-- Do NOT use markdown
-- Do NOT wrap in \`\`\`
-- Return an ARRAY
-
-Each item must be:
+Each item:
 {
   "name": string,
   "color": string,
@@ -49,41 +50,35 @@ Each item must be:
             },
             {
               type: "input_image",
-              image_url: `data:${mimeType};base64,${base64}`,
+              image_url: `data:image/jpeg;base64,${base64}`,
             },
           ],
         },
       ],
     });
 
-    // Extract model output
     const raw =
       response.output_text ||
       response.output?.[0]?.content?.[0]?.text ||
       "[]";
 
+    // --- SAFE JSON PARSE ---
     let bricks = [];
-
     try {
-      const cleaned = raw
-        .replace(/```json/gi, "")
-        .replace(/```/g, "")
-        .trim();
-
+      const cleaned = raw.replace(/```json|```/g, "").trim();
       bricks = JSON.parse(cleaned);
       if (!Array.isArray(bricks)) bricks = [];
-    } catch (err) {
-      console.error("JSON PARSE ERROR:", err);
-      console.error("RAW MODEL OUTPUT:", raw);
-      bricks = [];
+    } catch (e) {
+      console.error("JSON parse error:", e);
+      console.error("RAW:", raw);
     }
 
     return NextResponse.json({ bricks });
 
-  } catch (err) {
-    console.error("ANALYZE IMAGE ERROR:", err);
+  } catch (error) {
+    console.error("ANALYZE IMAGE ERROR:", error);
     return NextResponse.json(
-      { error: "Failed to analyze image", details: err.message },
+      { error: "Failed to analyze image" },
       { status: 500 }
     );
   }
