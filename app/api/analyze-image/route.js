@@ -14,12 +14,10 @@ export async function POST(req) {
       );
     }
 
-    // Convert to buffer
     const inputBuffer = Buffer.from(await file.arrayBuffer());
 
-    // ✅ Normalize image (ANY format → JPEG)
     const jpegBuffer = await sharp(inputBuffer)
-      .rotate() // fix orientation
+      .rotate() 
       .resize(1024, 1024, { fit: "inside" })
       .jpeg({ quality: 85 })
       .toBuffer();
@@ -62,7 +60,6 @@ Each item:
       response.output?.[0]?.content?.[0]?.text ||
       "[]";
 
-    // --- SAFE JSON PARSE ---
     let bricks = [];
     try {
       const cleaned = raw.replace(/```json|```/g, "").trim();
