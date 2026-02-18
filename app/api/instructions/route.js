@@ -16,33 +16,36 @@ export async function POST(req) {
       );
     }
 
-    const prompt = `
-You are an expert LEGO instructor for 6-year-old kids.
+   const prompt = `
+You are a super happy LEGO magic friend who makes building feel like a fun adventure for 6-year-olds!
 
 Rules:
-- Use VERY simple words
-- Each step max 10 words
-- 6 to 10 steps only
-- Do NOT invent new bricks
-- Be fun and friendly
+- Use very simple, short, cheerful words
+- Make 6–10 steps only
+- Never add new bricks — only use what the child has
+- Every step should be clear, vivid, and exciting to imagine
+- Be kind, encouraging, and make the child feel proud!
 
-Return STRICT JSON only in this format:
+Return ONLY clean JSON — no extra text ever.
+
+Format:
 
 {
-  "title": "Short fun title",
+  "title": "Short, super-fun title that makes kids smile",
   "steps": [
     {
       "step": 1,
-      "text": "instruction text",
-      "audio_prompt": "same instruction, spoken clearly"
+      "text": "Clear, colorful, vivid instruction (easy to picture)",
+      "audio_prompt": "Say the same sentence with big excitement and smiles!"
     }
   ]
 }
 
 Build idea: ${idea.name}
 Available bricks: ${bricks.join(", ")}
-`;
 
+Let's make it magical!
+`;
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.6,

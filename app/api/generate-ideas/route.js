@@ -11,6 +11,7 @@ export async function POST(req) {
         { name: "Simple Robot" },
         { name: "Small Car" },
         { name: "Cute Animal" },
+        { name: "Flying Airplane" },   
       ],
     });
   } catch (error) {
