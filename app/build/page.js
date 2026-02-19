@@ -12,7 +12,7 @@ export default function OpenAIInstructionsPage() {
   const [instructions, setInstructions] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-
+  const [speakingStep, setSpeakingStep] = useState(null); 
   useEffect(() => {
     if (!searchParams) return;
 
@@ -38,64 +38,111 @@ export default function OpenAIInstructionsPage() {
   useEffect(() => {
     if (!selectedIdea) return;
 
-    const fetchOpenAIInstructions = async () => {
-      setLoading(true);
-      setError(null);
-      setInstructions(null);
+   const fetchOpenAIInstructions = async () => {
+  setLoading(true);
+  setError(null);
+  setInstructions(null);
 
+  try {
+    const res = await fetch("/api/instructions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        idea: selectedIdea,
+        bricks: bricks.map((b) => `${b.name} (${b.color})`),
+      }),
+    });
+
+    if (!res.ok) {
+      let errorText = "Unknown server error";
       try {
-        const res = await fetch("/api/instructions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            idea: selectedIdea,
-            bricks: bricks.map((b) => `${b.name} (${b.color})`),
-          }),
-        });
+        errorText = await res.text(); 
+      } catch {}
+      throw new Error(`Server responded ${res.status}: ${errorText}`);
+    }
 
-        if (!res.ok) {
-          throw new Error(await res.text());
-        }
+    let data;
+    try {
+      data = await res.json();
+    } catch (jsonErr) {
+      throw new Error("Invalid JSON from server: " + jsonErr.message);
+    }
 
-        const data = await res.json();
-
-        if (data?.steps && Array.isArray(data.steps)) {
-          setInstructions(data);
-        } else {
-          throw new Error("Invalid OpenAI instructions format");
-        }
-      } catch (err) {
-        console.error("OpenAI instructions failed:", err);
-        setError(err.message || "Failed to load OpenAI instructions");
-      } finally {
-        setLoading(false);
-      }
-    };
+    if (data?.steps && Array.isArray(data.steps)) {
+      setInstructions(data);
+    } else {
+      throw new Error("Response missing valid steps array");
+    }
+  } catch (err) {
+    console.error("OpenAI instructions failed:", err);
+    setError(
+      err.message?.includes("404") 
+        ? "Instructions endpoint not found — check route setup"
+        : err.message || "Failed to load instructions. Please try again."
+    );
+  } finally {
+    setLoading(false);
+  }
+};
 
     fetchOpenAIInstructions();
   }, [selectedIdea, bricks]);
 
-  const playVoice = async (text) => {
-    if (!text) return;
-    try {
-      const res = await fetch("/api/text-to-speech", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      });
+  const playVoice = (text, stepIndex) => {
+    if (!text?.trim()) return;
 
-      if (!res.ok) throw new Error("OpenAI TTS failed");
+    const synth = window.speechSynthesis;
 
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.play();
-      audio.onended = () => URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error(err);
-      alert("OpenAI voice not available right now");
+    if (synth) synth.cancel();
+
+    if (speakingStep === stepIndex) {
+      setSpeakingStep(null);
+      return;
     }
+
+    setSpeakingStep(stepIndex);
+
+    const utterance = new SpeechSynthesisUtterance(text.trim());
+
+    const voices = synth.getVoices();
+    const bestVoice = voices.find(v =>
+      v.lang.includes("en") &&
+      (v.name.includes("Google") || v.name.includes("Microsoft") ||
+       v.name.includes("Natural") || v.name.includes("Premium"))
+    ) || voices.find(v => v.lang.includes("en")) || voices[0];
+
+    if (bestVoice) utterance.voice = bestVoice;
+
+    utterance.lang = "en-US";
+    utterance.pitch = 1.0;
+    utterance.rate = 0.95; 
+    utterance.volume = 1.0;
+
+    utterance.onend = () => setSpeakingStep(null);
+
+    utterance.onerror = (e) => {
+      if (e.error !== "interrupted") {
+        console.warn("Speech error:", e.error);
+        setSpeakingStep(null);
+      }
+    };
+
+    synth.speak(utterance);
   };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const loadVoices = () => {
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length > 0) {
+        console.log("Voices loaded:", voices.map(v => v.name));
+      }
+    };
+
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+  }, []);
 
   if (!selectedIdea) {
     return (
@@ -120,6 +167,8 @@ export default function OpenAIInstructionsPage() {
 
   return (
     <main className="max-w-5xl mx-auto p-6 pb-20">
+            <h1 className="text-4xl font-bold mb-8 text-center">BrickBuilder 🧱</h1>
+
       <div className="mt-8 bg-white shadow-lg rounded-2xl p-8 border border-gray-100">
         <h1 className="text-3xl md:text-4xl font-bold mb-8 text-gray-900">
           Step-by-step Instructions for {selectedIdea.name}
@@ -136,7 +185,7 @@ export default function OpenAIInstructionsPage() {
           </div>
         ) : instructions ? (
           <div className="space-y-6">
-            {instructions.steps.map((step) => (
+            {instructions.steps.map((step, index) => (
               <div
                 key={step.step}
                 className="flex items-start gap-5 border-b border-gray-200 pb-5 last:border-0"
@@ -155,11 +204,15 @@ export default function OpenAIInstructionsPage() {
                   )}
                 </div>
                 <button
-                  onClick={() => playVoice(step.text)}
-                  className="p-3 hover:bg-purple-50 rounded-full transition-colors shrink-0"
-                  title="Listen with OpenAI voice"
+                  onClick={() => playVoice(step.text, index)}
+                  className={`p-3 rounded-full transition-all shrink-0 ${
+                    speakingStep === index
+                      ? "bg-purple-200 text-white shadow-md"
+                      : "hover:bg-purple-50 text-purple-700"
+                  }`}
+                  title={speakingStep === index ? "Stop speaking" : "Listen to this step"}
                 >
-                  <Volume2 className="w-7 h-7 text-purple-700" />
+                  <Volume2 className="w-7 h-7" />
                 </button>
               </div>
             ))}

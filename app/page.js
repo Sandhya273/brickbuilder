@@ -41,8 +41,17 @@ export default function UploadPage() {
       const data = await res.json();
       const bricks = Array.isArray(data.bricks) ? data.bricks : [];
 
-      const bricksParam = encodeURIComponent(JSON.stringify(bricks));
-      router.push(`/bricks?bricks=${bricksParam}`);
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+
+      reader.onload = () => {
+        const imageBase64 = reader.result; 
+
+        const bricksParam = encodeURIComponent(JSON.stringify(bricks));
+        const imageParam = encodeURIComponent(imageBase64);
+
+        router.push(`/bricks?bricks=${bricksParam}&image=${imageParam}`);
+      };
     } catch (err) {
       setError(err.message || "Failed to analyze image");
     } finally {
@@ -100,8 +109,8 @@ export default function UploadPage() {
         </button>
 
         <p className="mt-4 text-sm text-center text-gray-600">
-  Scanning your LEGO bricks... just a moment
-</p>
+          Scanning your LEGO bricks... just a moment
+        </p>
       </div>
 
       {error && <p className="text-red-600 mt-8 text-center font-medium">{error}</p>}

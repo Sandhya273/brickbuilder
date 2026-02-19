@@ -109,6 +109,8 @@ export default function IdeasPage() {
   
   return (
     <main className="max-w-6xl mx-auto p-6 pb-20">
+            <h1 className="text-4xl font-bold mb-8 text-center">BrickBuilder 🧱</h1>
+
       <h1 className="text-3xl md:text-4xl font-bold mb-10 text-center text-gray-900">
         Your LEGO Building Ideas
       </h1>
