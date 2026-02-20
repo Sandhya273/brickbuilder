@@ -3,8 +3,8 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Bot, Car, PawPrint, Plane } from "lucide-react";
-
-export default function IdeasPage() {
+import { Suspense } from "react";  
+function IdeasContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -62,7 +62,6 @@ export default function IdeasPage() {
     }
   };
 
- 
   if (parseError) {
     return (
       <main className="min-h-screen flex items-center justify-center p-6">
@@ -83,7 +82,6 @@ export default function IdeasPage() {
     );
   }
 
-  
   if (ideas.length === 0) {
     return (
       <main className="min-h-screen flex items-center justify-center p-6">
@@ -106,10 +104,9 @@ export default function IdeasPage() {
     );
   }
 
-  
   return (
     <main className="max-w-6xl mx-auto p-6 pb-20">
-            <h1 className="text-4xl font-bold mb-8 text-center">BrickBuilder 🧱</h1>
+      <h1 className="text-4xl font-bold mb-8 text-center">BrickBuilder 🧱</h1>
 
       <h1 className="text-3xl md:text-4xl font-bold mb-10 text-center text-gray-900">
         Your LEGO Building Ideas
@@ -139,5 +136,22 @@ export default function IdeasPage() {
         ))}
       </div>
     </main>
+  );
+}
+
+export default function IdeasPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-4 border-indigo-600 mx-auto mb-4"></div>
+            <p className="text-lg font-medium text-gray-700">Loading your LEGO ideas...</p>
+          </div>
+        </div>
+      }
+    >
+      <IdeasContent />
+    </Suspense>
   );
 }

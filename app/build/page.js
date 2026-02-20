@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { Loader2, Volume2 } from "lucide-react";
+import { Suspense } from "react";  
 
-export default function OpenAIInstructionsPage() {
+function OpenAIInstructionsContent() {
   const searchParams = useSearchParams();
 
   const [selectedIdea, setSelectedIdea] = useState(null);
@@ -12,7 +13,8 @@ export default function OpenAIInstructionsPage() {
   const [instructions, setInstructions] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [speakingStep, setSpeakingStep] = useState(null); 
+  const [speakingStep, setSpeakingStep] = useState(null);
+
   useEffect(() => {
     if (!searchParams) return;
 
@@ -38,52 +40,52 @@ export default function OpenAIInstructionsPage() {
   useEffect(() => {
     if (!selectedIdea) return;
 
-   const fetchOpenAIInstructions = async () => {
-  setLoading(true);
-  setError(null);
-  setInstructions(null);
+    const fetchOpenAIInstructions = async () => {
+      setLoading(true);
+      setError(null);
+      setInstructions(null);
 
-  try {
-    const res = await fetch("/api/instructions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        idea: selectedIdea,
-        bricks: bricks.map((b) => `${b.name} (${b.color})`),
-      }),
-    });
-
-    if (!res.ok) {
-      let errorText = "Unknown server error";
       try {
-        errorText = await res.text(); 
-      } catch {}
-      throw new Error(`Server responded ${res.status}: ${errorText}`);
-    }
+        const res = await fetch("/api/instructions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            idea: selectedIdea,
+            bricks: bricks.map((b) => `${b.name} (${b.color})`),
+          }),
+        });
 
-    let data;
-    try {
-      data = await res.json();
-    } catch (jsonErr) {
-      throw new Error("Invalid JSON from server: " + jsonErr.message);
-    }
+        if (!res.ok) {
+          let errorText = "Unknown server error";
+          try {
+            errorText = await res.text();
+          } catch {}
+          throw new Error(`Server responded ${res.status}: ${errorText}`);
+        }
 
-    if (data?.steps && Array.isArray(data.steps)) {
-      setInstructions(data);
-    } else {
-      throw new Error("Response missing valid steps array");
-    }
-  } catch (err) {
-    console.error("OpenAI instructions failed:", err);
-    setError(
-      err.message?.includes("404") 
-        ? "Instructions endpoint not found — check route setup"
-        : err.message || "Failed to load instructions. Please try again."
-    );
-  } finally {
-    setLoading(false);
-  }
-};
+        let data;
+        try {
+          data = await res.json();
+        } catch (jsonErr) {
+          throw new Error("Invalid JSON from server: " + jsonErr.message);
+        }
+
+        if (data?.steps && Array.isArray(data.steps)) {
+          setInstructions(data);
+        } else {
+          throw new Error("Response missing valid steps array");
+        }
+      } catch (err) {
+        console.error("OpenAI instructions failed:", err);
+        setError(
+          err.message?.includes("404")
+            ? "Instructions endpoint not found — check route setup"
+            : err.message || "Failed to load instructions. Please try again."
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
 
     fetchOpenAIInstructions();
   }, [selectedIdea, bricks]);
@@ -115,7 +117,7 @@ export default function OpenAIInstructionsPage() {
 
     utterance.lang = "en-US";
     utterance.pitch = 1.0;
-    utterance.rate = 0.95; 
+    utterance.rate = 0.95;
     utterance.volume = 1.0;
 
     utterance.onend = () => setSpeakingStep(null);
@@ -167,7 +169,7 @@ export default function OpenAIInstructionsPage() {
 
   return (
     <main className="max-w-5xl mx-auto p-6 pb-20">
-            <h1 className="text-4xl font-bold mb-8 text-center">BrickBuilder 🧱</h1>
+      <h1 className="text-4xl font-bold mb-8 text-center">BrickBuilder 🧱</h1>
 
       <div className="mt-8 bg-white shadow-lg rounded-2xl p-8 border border-gray-100">
         <h1 className="text-3xl md:text-4xl font-bold mb-8 text-gray-900">
@@ -224,5 +226,20 @@ export default function OpenAIInstructionsPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function OpenAIInstructionsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-screen">
+          <Loader2 className="h-12 w-12 animate-spin text-indigo-600" />
+          <span className="ml-4 text-lg font-medium text-gray-700">Loading BrickBuilder instructions...</span>
+        </div>
+      }
+    >
+      <OpenAIInstructionsContent />
+    </Suspense>
   );
 }
