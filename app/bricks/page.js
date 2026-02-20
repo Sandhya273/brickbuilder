@@ -3,13 +3,15 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
+import { Suspense } from "react";   // ← Add this import
 
-export default function BricksPage() {
+// This inner component contains all the logic that uses useSearchParams
+function BricksContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
   const [bricks, setBricks] = useState([]);
-  const [uploadedImage, setUploadedImage] = useState(null); 
+  const [uploadedImage, setUploadedImage] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -33,7 +35,7 @@ export default function BricksPage() {
     if (imageParam) {
       try {
         const decoded = decodeURIComponent(imageParam);
-        console.log("Image starts with:", decoded.substring(0, 50)); 
+        console.log("Image starts with:", decoded.substring(0, 50));
         setUploadedImage(decoded);
       } catch (e) {
         console.error("Image decode error:", e);
@@ -73,7 +75,11 @@ export default function BricksPage() {
   };
 
   if (bricks.length === 0 && !error) {
-    return <div className="p-10 text-center">No bricks data found. Please upload a photo first.</div>;
+    return (
+      <div className="p-10 text-center">
+        No bricks data found. Please upload a photo first.
+      </div>
+    );
   }
 
   return (
@@ -92,7 +98,7 @@ export default function BricksPage() {
               className="max-w-full h-auto max-h-[300px] object-contain"
               onError={(e) => {
                 console.error("Failed to load image thumbnail");
-                e.target.src = "/placeholder.jpg"; 
+                e.target.src = "/placeholder.jpg";
               }}
             />
           </div>
@@ -134,7 +140,7 @@ export default function BricksPage() {
         <button
           onClick={generateIdeas}
           disabled={loading}
-          className="mt-6  px-5 py-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2"
+          className="mt-6 px-5 py-2 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 disabled:opacity-50 flex items-center justify-center gap-2 w-full sm:w-auto"
         >
           {loading && <Loader2 className="h-5 w-5 animate-spin" />}
           {loading ? "Generating..." : "Generate Building Ideas"}
@@ -143,5 +149,18 @@ export default function BricksPage() {
 
       {error && <p className="text-red-600 text-center mt-6">{error}</p>}
     </main>
+  );
+}
+
+// The actual page component — wraps the content in Suspense
+export default function BricksPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex items-center justify-center min-h-screen">
+        <Loader2 className="h-12 w-12 animate-spin text-indigo-600" />
+      </div>
+    }>
+      <BricksContent />
+    </Suspense>
   );
 }
