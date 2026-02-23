@@ -10,67 +10,77 @@ function IdeasContent() {
 
   const [ideas, setIdeas] = useState([]);
   const [bricks, setBricks] = useState([]);
-  const [parseError, setParseError] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    const ideasParam = searchParams.get("ideas");
-    const bricksParam = searchParams.get("bricks");
+    const sessionKey = searchParams.get("session");
 
-    console.log("Raw ideas param:", ideasParam);
-    console.log("Raw bricks param:", bricksParam);
+    if (sessionKey) {
+      try {
+        const stored = localStorage.getItem(sessionKey);
+        if (!stored) throw new Error("Session not found");
 
-    setParseError(null);
+        const parsed = JSON.parse(stored);
 
-    try {
-      if (ideasParam) {
-        const decoded = decodeURIComponent(ideasParam);
-        const parsed = JSON.parse(decoded);
-        console.log("Parsed ideas:", parsed);
-        setIdeas(Array.isArray(parsed) ? parsed : []);
+        if (Date.now() - parsed.timestamp > 2 * 60 * 60 * 1000) {
+          localStorage.removeItem(sessionKey);
+          throw new Error("Session expired");
+        }
+
+        setBricks(parsed.bricks || []);
+        setIdeas(Array.isArray(parsed.ideas) ? parsed.ideas : []);
+
+      } catch (e) {
+        console.error("Session load error:", e);
+        setError("Could not load your ideas. Please try generating again.");
       }
-    } catch (err) {
-      console.error("Failed to parse ideas:", err);
-      setParseError("Could not read the list of ideas from the URL");
-    }
-
-    try {
-      if (bricksParam) {
-        const decoded = decodeURIComponent(bricksParam);
-        const parsed = JSON.parse(decoded);
-        console.log("Parsed bricks:", parsed);
-        setBricks(Array.isArray(parsed) ? parsed : []);
-      }
-    } catch (err) {
-      console.error("Failed to parse bricks:", err);
-      setParseError((prev) =>
-        prev ? `${prev} and bricks` : "Could not read bricks from the URL"
-      );
+    } else {
+      setError("No session found. Please go back and generate ideas.");
     }
   }, [searchParams]);
 
   const handleSelectIdea = (idea) => {
     if (!idea) return;
 
+    const sessionKeyFromUrl = searchParams.get("session");
+    if (!sessionKeyFromUrl) {
+      setError("Cannot continue — session is missing.");
+      return;
+    }
+
     try {
-      const ideaParam = encodeURIComponent(JSON.stringify(idea));
-      const bricksParam = encodeURIComponent(JSON.stringify(bricks));
-      console.log("Navigating to build → idea:", idea.name);
-      router.push(`/build?idea=${ideaParam}&bricks=${bricksParam}`);
+      const sessionKey = sessionKeyFromUrl;
+
+      const currentStored = localStorage.getItem(sessionKey);
+      let sessionData = currentStored ? JSON.parse(currentStored) : {
+        bricks: [],
+        uploadedImage: null,
+        ideas: [],
+        timestamp: Date.now(),
+      };
+
+      sessionData = {
+        ...sessionData,
+        selectedIdea: idea,
+        timestamp: Date.now(),        
+      };
+
+      localStorage.setItem(sessionKey, JSON.stringify(sessionData));
+
+      router.push(`/build?session=${sessionKey}`);
     } catch (err) {
-      console.error("Failed to encode navigation params:", err);
-      alert("Something went wrong while selecting this idea. Please try again.");
+      console.error("Failed to save selected idea:", err);
+      setError("Something went wrong while selecting this idea.");
     }
   };
 
-  if (parseError) {
+  if (error) {
     return (
       <main className="min-h-screen flex items-center justify-center p-6">
         <div className="max-w-md text-center">
-          <h2 className="text-2xl font-bold text-red-600 mb-4">Loading Error</h2>
-          <p className="text-gray-700 mb-6">{parseError}</p>
-          <p className="text-sm text-gray-500 mb-8">
-            Try going back to the previous page and generating ideas again.
-          </p>
+          <h2 className="text-2xl font-bold text-red-600 mb-4">Error</h2>
+          <p className="text-gray-700 mb-6">{error}</p>
           <button
             onClick={() => router.back()}
             className="px-6 py-3 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors"

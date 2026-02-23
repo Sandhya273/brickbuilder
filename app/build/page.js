@@ -1,39 +1,56 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { Loader2, Volume2 } from "lucide-react";
-import { Suspense } from "react";  
+import { Suspense } from "react";
 
 function OpenAIInstructionsContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
 
   const [selectedIdea, setSelectedIdea] = useState(null);
   const [bricks, setBricks] = useState([]);
   const [instructions, setInstructions] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [speakingStep, setSpeakingStep] = useState(null);
 
   useEffect(() => {
-    if (!searchParams) return;
+    const sessionKey = searchParams.get("session");
+
+    if (!sessionKey) {
+      setError("No session found. Please select an idea first.");
+      setLoading(false);
+      return;
+    }
 
     try {
-      const ideaParam = searchParams.get("idea");
-      const bricksParam = searchParams.get("bricks");
-
-      if (ideaParam) {
-        const parsed = JSON.parse(decodeURIComponent(ideaParam));
-        setSelectedIdea(parsed);
+      const stored = localStorage.getItem(sessionKey);
+      if (!stored) {
+        throw new Error("Session data not found");
       }
 
-      if (bricksParam) {
-        const parsedBricks = JSON.parse(decodeURIComponent(bricksParam));
-        setBricks(Array.isArray(parsedBricks) ? parsedBricks : []);
+      const parsed = JSON.parse(stored);
+
+      if (Date.now() - parsed.timestamp > 4 * 60 * 60 * 1000) {
+        localStorage.removeItem(sessionKey);
+        throw new Error("Session expired");
       }
+
+      const idea = parsed.selectedIdea;
+      if (!idea) {
+        throw new Error("No selected idea found in session");
+      }
+
+      setSelectedIdea(idea);
+      setBricks(Array.isArray(parsed.bricks) ? parsed.bricks : []);
+
     } catch (err) {
-      console.error("Failed to parse params:", err);
-      setError("Failed to load idea or bricks from URL");
+      console.error("Build page session error:", err);
+      setError(err.message || "Failed to load selected idea. Please try again.");
+    } finally {
+      setLoading(false);
     }
   }, [searchParams]);
 
@@ -63,12 +80,7 @@ function OpenAIInstructionsContent() {
           throw new Error(`Server responded ${res.status}: ${errorText}`);
         }
 
-        let data;
-        try {
-          data = await res.json();
-        } catch (jsonErr) {
-          throw new Error("Invalid JSON from server: " + jsonErr.message);
-        }
+        const data = await res.json();
 
         if (data?.steps && Array.isArray(data.steps)) {
           setInstructions(data);
@@ -146,22 +158,33 @@ function OpenAIInstructionsContent() {
     window.speechSynthesis.onvoiceschanged = loadVoices;
   }, []);
 
-  if (!selectedIdea) {
+  if (loading && !selectedIdea) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6">
+        <div className="text-center">
+          <Loader2 className="h-12 w-12 animate-spin text-indigo-600 mx-auto mb-4" />
+          <p className="text-lg font-medium text-gray-700">Loading build instructions...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!selectedIdea || error) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
         <div className="text-center max-w-md">
           <h2 className="text-2xl font-bold text-red-600 mb-4">
-            No idea selected
+            {error || "No idea selected"}
           </h2>
           <p className="text-gray-600 mb-6">
-            Please go back and select an idea first.
+            {error || "Please go back and select an idea first."}
           </p>
-          <a
-            href="/build"
-            className="inline-block px-6 py-3 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors"
+          <button
+            onClick={() => router.back()}
+            className="px-6 py-3 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors"
           >
-            Back to Build
-          </a>
+            Go Back
+          </button>
         </div>
       </div>
     );
@@ -179,7 +202,7 @@ function OpenAIInstructionsContent() {
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-indigo-600 mr-3" />
-            <span className="text-gray-600 font-medium">Loading instructions...</span>
+            <span className="text-gray-600 font-medium">Generating instructions...</span>
           </div>
         ) : error ? (
           <div className="p-6 bg-red-50 border border-red-200 rounded-xl text-center text-red-700 font-medium">
@@ -189,11 +212,11 @@ function OpenAIInstructionsContent() {
           <div className="space-y-6">
             {instructions.steps.map((step, index) => (
               <div
-                key={step.step}
+                key={step.step || index}
                 className="flex items-start gap-5 border-b border-gray-200 pb-5 last:border-0"
               >
                 <div className="bg-purple-600 text-white w-11 h-11 rounded-full flex items-center justify-center font-bold shrink-0 text-xl">
-                  {step.step}
+                  {step.step || index + 1}
                 </div>
                 <div className="flex-1">
                   <p className="font-medium text-gray-900 leading-relaxed">

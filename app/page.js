@@ -36,23 +36,33 @@ export default function UploadPage() {
         body: formData,
       });
 
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || "Analysis failed");
+      }
 
       const data = await res.json();
       const bricks = Array.isArray(data.bricks) ? data.bricks : [];
 
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
+      const imageBase64 = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
 
-      reader.onload = () => {
-        const imageBase64 = reader.result; 
+      const sessionKey = `brick_session_${Date.now()}`;
 
-        const bricksParam = encodeURIComponent(JSON.stringify(bricks));
-        const imageParam = encodeURIComponent(imageBase64);
+      localStorage.setItem(sessionKey, JSON.stringify({
+        bricks,
+        uploadedImage: imageBase64,
+        timestamp: Date.now(),
+      }));
 
-        router.push(`/bricks?bricks=${bricksParam}&image=${imageParam}`);
-      };
+      router.push(`/bricks?session=${sessionKey}`);
+
     } catch (err) {
+      console.error(err);
       setError(err.message || "Failed to analyze image");
     } finally {
       setLoading(false);

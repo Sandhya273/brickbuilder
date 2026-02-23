@@ -3,9 +3,8 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import { Suspense } from "react";   // ← Add this import
+import { Suspense } from "react";   
 
-// This inner component contains all the logic that uses useSearchParams
 function BricksContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -15,64 +14,83 @@ function BricksContent() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    const bricksParam = searchParams.get("bricks");
-    const imageParam = searchParams.get("image");
+ useEffect(() => {
+  const sessionKey = searchParams.get("session");
 
-    console.log("Bricks param length:", bricksParam?.length || "missing");
-    console.log("Image param length:", imageParam?.length || "missing");
-
-    if (bricksParam) {
-      try {
-        const parsed = JSON.parse(decodeURIComponent(bricksParam));
-        setBricks(Array.isArray(parsed) ? parsed : []);
-      } catch (e) {
-        console.error("Bricks parse error:", e);
-        setError("Invalid bricks data");
-      }
-    }
-
-    if (imageParam) {
-      try {
-        const decoded = decodeURIComponent(imageParam);
-        console.log("Image starts with:", decoded.substring(0, 50));
-        setUploadedImage(decoded);
-      } catch (e) {
-        console.error("Image decode error:", e);
-      }
-    }
-  }, [searchParams]);
-
-  const generateIdeas = async () => {
-    if (bricks.length === 0) return;
-
-    setLoading(true);
-    setError(null);
-
+  if (sessionKey) {
     try {
-      const res = await fetch("/api/generate-ideas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          bricks: bricks.map((b) => `${b.name} (${b.color})`),
-        }),
-      });
+      const stored = localStorage.getItem(sessionKey);
+      if (!stored) throw new Error("Session not found");
 
-      if (!res.ok) throw new Error(await res.text());
+      const parsed = JSON.parse(stored);
 
-      const data = await res.json();
-      const ideas = Array.isArray(data.ideas) ? data.ideas : [];
+      if (Date.now() - parsed.timestamp > 2 * 60 * 60 * 1000) {
+        localStorage.removeItem(sessionKey);
+        throw new Error("Session expired");
+      }
 
-      const bricksParam = encodeURIComponent(JSON.stringify(bricks));
-      const imageParam = uploadedImage ? encodeURIComponent(uploadedImage) : "";
+      setBricks(parsed.bricks || []);
+      setUploadedImage(parsed.uploadedImage || null);
 
-      router.push(`/ideas?bricks=${bricksParam}&ideas=${encodeURIComponent(JSON.stringify(ideas))}&image=${imageParam}`);
-    } catch (err) {
-      setError(err.message || "Failed to generate ideas");
-    } finally {
-      setLoading(false);
+    } catch (e) {
+      console.error("Session load error:", e);
+      setError("Could not load your bricks data. Please try uploading again.");
     }
-  };
+  } else {
+    setError("No session found. Please upload a photo first.");
+  }
+}, [searchParams]);
+
+const generateIdeas = async () => {
+  if (bricks.length === 0) return;
+
+  setLoading(true);
+  setError(null);
+
+  try {
+    const res = await fetch("/api/generate-ideas", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bricks: bricks.map((b) => `${b.name} (${b.color})`),
+        
+      }),
+    });
+
+    if (!res.ok) throw new Error(await res.text());
+
+    const data = await res.json();
+    const ideas = Array.isArray(data.ideas) ? data.ideas : [];
+
+    
+    const sessionKeyFromUrl = searchParams.get("session");
+    const sessionKey = sessionKeyFromUrl || `brick_session_${Date.now()}`;
+
+    const currentStored = localStorage.getItem(sessionKey);
+    let sessionData = currentStored ? JSON.parse(currentStored) : {
+      bricks: [],
+      uploadedImage: null,
+      timestamp: Date.now(),
+    };
+
+    sessionData = {
+      ...sessionData,
+      bricks: bricks,              
+      uploadedImage: uploadedImage,
+      ideas: ideas,                 
+      timestamp: Date.now(),        
+    };
+
+    localStorage.setItem(sessionKey, JSON.stringify(sessionData));
+
+    router.push(`/ideas?session=${sessionKey}`);
+
+  } catch (err) {
+    setError(err.message || "Failed to generate ideas");
+  } finally {
+    setLoading(false);
+  }
+};
 
   if (bricks.length === 0 && !error) {
     return (
@@ -152,7 +170,6 @@ function BricksContent() {
   );
 }
 
-// The actual page component — wraps the content in Suspense
 export default function BricksPage() {
   return (
     <Suspense fallback={
