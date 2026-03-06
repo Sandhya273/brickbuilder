@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, Upload, Camera, X, Image as ImageIcon, AlertCircle } from "lucide-react";
 import Header from "../components/Header";
 import Footer from "../components/Footer";
+import { supabase } from "@/lib/supabase";
 
 export default function UploadPage() {
   const [file, setFile] = useState(null);
@@ -46,59 +47,102 @@ export default function UploadPage() {
   };
 
   const analyzeImage = async () => {
-    if (!file) {
-      setError("Please select or capture an image first");
-      return;
+  if (!file) {
+    setError("Please select or capture an image first");
+    return;
+  }
+
+  setLoading(true);
+  setError(null);
+
+  try {
+    console.log("=== START UPLOAD ===");
+    console.log("File:", file.name, file.size, file.type);
+
+    const arrayBuf = await file.arrayBuffer();
+    console.log("ArrayBuffer size:", arrayBuf.byteLength);
+
+    const uint8Buf = new Uint8Array(arrayBuf);
+    console.log("Uint8Array size:", uint8Buf.length, "bytes");
+
+    if (uint8Buf.length < 1000) {
+      throw new Error(`Image data too small (${uint8Buf.length} bytes)`);
     }
 
-    setLoading(true);
-    setError(null);
+    const fileExt = file.name.split('.').pop() || 'jpg';
+    const fileName = `${Date.now()}.${fileExt}`;
+    const filePath = `uploads/${fileName}`;
 
+    console.log("Storage path:", filePath);
+    const { error: uploadErr } = await supabase.storage
+      .from('lego-images')
+      .upload(filePath, file, { cacheControl: '3600', upsert: false });
+
+    if (uploadErr) console.warn("Storage failed:", uploadErr.message);
+
+    const imageBase64 = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+
+    console.log("AI call...");
     const formData = new FormData();
     formData.append("image", file);
 
-    try {
-      const response = await fetch("/api/analyze-image", {
-        method: "POST",
-        body: formData,
-      });
+    const res = await fetch("/api/analyze-image", { method: "POST", body: formData });
+    if (!res.ok) throw new Error(await res.text() || `AI ${res.status}`);
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(errorText || `Server error (${response.status})`);
-      }
+    const { bricks = [] } = await res.json();
+    console.log(`Bricks: ${bricks.length}`);
 
-      const data = await response.json();
-      const bricks = Array.isArray(data.bricks) ? data.bricks : [];
+    console.log("DB insert - sending", uint8Buf.length, "bytes");
+    const { data, error: dbErr } = await supabase
+      .from("sessions")
+      .insert({
+        image_data: uint8Buf,           
+        timestamp: new Date().toISOString(),
+        image_path: uploadErr ? null : filePath,
+      })
+      .select("id")
+      .single();
 
-      const imageBase64 = await new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result);
-        reader.onerror = () => reject(new Error("Failed to read image file"));
-        reader.readAsDataURL(file);
-      });
-
-      const sessionKey = `brick_session_${Date.now()}`;
-
-      localStorage.setItem(
-        sessionKey,
-        JSON.stringify({
-          bricks,
-          uploadedImage: imageBase64,
-          timestamp: Date.now(),
-        })
-      );
-
-      router.push(`/bricks?session=${sessionKey}`);
-    } catch (err) {
-      const message = err?.message || "An unexpected error occurred";
-      console.error("Analysis failed:", err);
-      setError(message);
-    } finally {
-      setLoading(false);
+    if (dbErr) {
+      console.error("DB error:", dbErr);
+      throw new Error(`DB failed: ${dbErr.message}`);
     }
-  };
 
+    const sessionId = data.id;
+    console.log("Session ID:", sessionId);
+
+    if (bricks.length > 0) {
+      const { error: bricksErr } = await supabase
+        .from("detected_bricks")
+        .insert({ session_id: sessionId, bricks });
+
+      if (bricksErr) console.warn("Bricks RLS warning:", bricksErr.message);
+    }
+
+    // LocalStorage
+    const key = `brick_session_${sessionId}`;
+    localStorage.setItem(key, JSON.stringify({
+      bricks,
+      uploadedImage: imageBase64,
+      sessionId,
+      timestamp: Date.now(),
+    }));
+
+    console.log("Redirecting...");
+    router.push(`/bricks?session=${key}`);
+
+  } catch (err) {
+    console.error("UPLOAD ERROR:", err);
+    setError(err.message || "Upload failed");
+  } finally {
+    setLoading(false);
+  }
+};
   return (
     <div className="min-h-screen flex flex-col">
       <Header />

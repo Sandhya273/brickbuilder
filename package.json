@@ -12,6 +12,7 @@
     "@google-cloud/text-to-speech": "^6.4.0",
     "@google/genai": "^1.38.0",
     "@google/generative-ai": "^0.24.1",
+    "@supabase/supabase-js": "^2.98.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.562.0",
@@ -20,7 +21,6 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-webcam": "^7.2.0",
-    "sharp": "^0.34.5",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
