@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Bot, Car, PawPrint, Plane, Lightbulb, Loader2 } from "lucide-react";
 import { Suspense } from "react";
 import Header from "../../components/Header";
 import Footer from "../../components/Footer";
+import { supabase } from "@/lib/supabase";
 
 function IdeasContent() {
   const searchParams = useSearchParams();
@@ -13,80 +14,177 @@ function IdeasContent() {
 
   const [ideas, setIdeas] = useState([]);
   const [bricks, setBricks] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [selectedIdea, setSelectedIdea] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     const sessionKey = searchParams.get("session");
 
-    if (sessionKey) {
+    if (!sessionKey) {
+      setError("No session found in URL. Please go back and generate ideas.");
+      setLoading(false);
+      return;
+    }
+
+    const loadData = async () => {
       try {
+        console.log("[Ideas] Loading session:", sessionKey);
+
+        let localIdeas = [], localBricks = [], localSelected = null;
         const stored = localStorage.getItem(sessionKey);
-        if (!stored) throw new Error("Session not found");
+        if (stored) {
+          try {
+            const parsed = JSON.parse(stored);
+            if (Date.now() - parsed.timestamp > 2 * 60 * 60 * 1000) {
+              localStorage.removeItem(sessionKey);
+              throw new Error("Session expired");
+            }
 
-        const parsed = JSON.parse(stored);
-
-        if (Date.now() - parsed.timestamp > 2 * 60 * 60 * 1000) {
-          localStorage.removeItem(sessionKey);
-          throw new Error("Session expired");
+            localIdeas = Array.isArray(parsed.ideas) ? parsed.ideas : [];
+            localBricks = parsed.bricks || [];
+            localSelected = parsed.selectedIdea || null;
+          } catch (parseErr) {
+            console.warn("[Ideas] LocalStorage parse failed:", parseErr);
+          }
         }
 
-        setBricks(parsed.bricks || []);
-        setIdeas(Array.isArray(parsed.ideas) ? parsed.ideas : []);
-      } catch (e) {
-        console.error("Session load error:", e);
-        setError("Could not load your ideas. Please try generating again.");
+        setIdeas(localIdeas);
+        setBricks(localBricks);
+        setSelectedIdea(localSelected);
+
+        const sessionId = sessionKey.replace("brick_session_", "");
+        if (!sessionId || sessionId.length !== 36) {
+          throw new Error("Invalid session ID");
+        }
+
+        const { data: session, error: sessionErr } = await supabase
+          .from("sessions")
+          .select("id, selected_idea")
+          .eq("id", sessionId)
+          .single();
+
+        if (!sessionErr && session?.selected_idea) {
+          setSelectedIdea(session.selected_idea);
+        }
+
+        const { data: bricksRows } = await supabase
+          .from("detected_bricks")
+          .select("bricks")
+          .eq("session_id", sessionId);
+
+        if (bricksRows?.length > 0) {
+          setBricks(bricksRows.flatMap(r => r.bricks || []));
+        }
+
+        const { data: ideasRows } = await supabase
+          .from("ideas")
+          .select("ideas")
+          .eq("session_id", sessionId)
+          .order("created_at", { ascending: false })
+          .limit(1);
+
+        if (ideasRows?.[0]?.ideas) {
+          setIdeas(ideasRows[0].ideas);
+        }
+
+      } catch (err) {
+        console.error("[Ideas] Load error:", err);
+        setError(err.message || "Could not load data.");
+      } finally {
+        setLoading(false);
       }
-    } else {
-      setError("No session found. Please go back and generate ideas.");
-    }
+    };
+
+    loadData();
   }, [searchParams]);
 
-  const handleSelectIdea = (idea) => {
+  const handleSelectIdea = async (idea) => {
     if (!idea) return;
 
     const sessionKey = searchParams.get("session");
     if (!sessionKey) {
-      setError("Cannot continue — session is missing.");
+      setError("Session missing.");
       return;
     }
 
+    const sessionId = sessionKey.replace("brick_session_", "");
+
+    setLoading(true);
+
     try {
-      const currentStored = localStorage.getItem(sessionKey);
-      let sessionData = currentStored ? JSON.parse(currentStored) : {
-        bricks: [],
-        uploadedImage: null,
-        ideas: [],
-        timestamp: Date.now(),
-      };
+      const { error: updateErr } = await supabase
+        .from("sessions")
+        .update({ selected_idea: idea })
+        .eq("id", sessionId);
 
-      sessionData = {
-        ...sessionData,
-        selectedIdea: idea,
-        timestamp: Date.now(),
-      };
+      if (updateErr) throw updateErr;
 
+      const res = await fetch("/api/instructions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          idea,
+          bricks,
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `API error ${res.status}`);
+      }
+
+      const { title, steps } = await res.json();
+
+      if (!steps || !Array.isArray(steps)) {
+        throw new Error("Invalid instructions format");
+      }
+
+      const { error: insertErr } = await supabase
+        .from("instructions")
+        .insert({
+          session_id: sessionId,
+          instructions: { title, steps },
+        });
+
+      if (insertErr) throw insertErr;
+
+      console.log("[Ideas] Instructions saved:", steps.length, "steps");
+
+      const stored = localStorage.getItem(sessionKey);
+      const sessionData = stored ? JSON.parse(stored) : {};
+      sessionData.selectedIdea = idea;
+      sessionData.instructions = { title, steps };
+      sessionData.timestamp = Date.now();
       localStorage.setItem(sessionKey, JSON.stringify(sessionData));
 
       router.push(`/build?session=${sessionKey}`);
     } catch (err) {
-      console.error("Failed to save selected idea:", err);
-      setError("Something went wrong while selecting this idea.");
+      console.error("[Ideas] Select error:", err);
+      setError(err.message || "Failed to prepare build instructions.");
+    } finally {
+      setLoading(false);
     }
   };
 
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-12 w-12 animate-spin text-purple-600" />
+      </div>
+    );
+  }
+
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-4 py-12 bg-gradient-to-b from-slate-50 to-slate-100">
-        <div className="max-w-md w-full text-center bg-white rounded-2xl shadow-xl p-8 border border-slate-200">
-          <div className="text-red-500 mb-4">
-            <Bot size={48} className="mx-auto" />
-          </div>
-          <h2 className="text-2xl font-bold text-slate-800 mb-3">Oops!</h2>
-          <p className="text-slate-600 mb-8">{error}</p>
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="max-w-md text-center bg-white p-8 rounded-2xl shadow-xl border">
+          <Bot size={48} className="mx-auto text-red-500 mb-4" />
+          <h2 className="text-2xl font-bold mb-3">Oops!</h2>
+          <p className="text-slate-600 mb-6">{error}</p>
           <button
             onClick={() => router.back()}
-            className="px-8 py-3 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 transition-all shadow-md hover:shadow-lg active:scale-[0.98]"
+            className="px-8 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700"
           >
             Go Back
           </button>
@@ -97,19 +195,16 @@ function IdeasContent() {
 
   if (ideas.length === 0) {
     return (
-      <div className="min-h-screen flex items-center justify-center px-4 py-12 bg-gradient-to-b from-slate-50 to-slate-100">
-        <div className="max-w-md w-full text-center bg-white rounded-2xl shadow-xl p-10 border border-slate-200">
+      <div className="min-h-screen flex items-center justify-center px-4">
+        <div className="max-w-md text-center bg-white p-10 rounded-2xl shadow-xl border">
           <Lightbulb size={56} className="mx-auto text-purple-500 mb-6 opacity-80" />
-          <h2 className="text-2xl font-bold text-slate-800 mb-4">
-            No Building Ideas Yet
-          </h2>
-          <p className="text-slate-600 mb-8 leading-relaxed">
-            Go back to the detected bricks page and click
-            <span className="font-semibold text-indigo-600"> "Generate Building Ideas"</span>.
+          <h2 className="text-2xl font-bold mb-4">No Ideas Yet</h2>
+          <p className="text-slate-600 mb-8">
+            Go back and generate some building ideas first!
           </p>
           <button
             onClick={() => router.back()}
-            className="px-8 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-medium rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all shadow-md hover:shadow-lg active:scale-[0.98]"
+            className="px-8 py-3 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-xl hover:from-indigo-700 hover:to-purple-700"
           >
             Return to Bricks
           </button>
@@ -119,62 +214,86 @@ function IdeasContent() {
   }
 
   return (
-        <div className="min-h-screen flex flex-col">
-          <Header/>
+    <div className="min-h-screen flex flex-col">
+      <Header />
 
-    <main className="min-h-screen bg-gradient-to-b from-slate-50 to-slate-100 py-10 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-7xl mx-auto">
-        <div className="text-center mb-12 md:mb-16">
-          <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 mb-3 tracking-tight">
-            Creative Build Ideas <span className="text-purple-600">🧱</span>
-          </h1>
-          <p className="text-lg sm:text-xl text-slate-600 max-w-3xl mx-auto">
-            Choose one of these fun LEGO builds you can create with your bricks!
-          </p>
-        </div>
+      <main className="flex-grow bg-gradient-to-b from-slate-50 to-slate-100 py-10 px-4 sm:px-6 lg:px-8">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-12 md:mb-16">
+            <h1 className="text-4xl sm:text-5xl font-extrabold text-slate-900 mb-3 tracking-tight">
+              Creative Build Ideas <span className="text-purple-600">🧱</span>
+            </h1>
+            <p className="text-lg sm:text-xl text-slate-600 max-w-3xl mx-auto">
+              Choose one of these fun LEGO builds you can create with your bricks!
+            </p>
+          </div>
 
-        <div className="grid gap-6 sm:gap-8 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          {ideas.map((idea, idx) => (
-            <div
-              key={idx}
-              className="group bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-2xl hover:border-indigo-300/60 transition-all duration-300 overflow-hidden flex flex-col h-full"
-            >
-              <div className="p-6 sm:p-7 flex flex-col flex-grow">
-                <div className="flex items-start gap-4 mb-5">
-                  <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-50 to-purple-50 text-indigo-600 group-hover:scale-110 transition-transform">
-                    {idx === 0 && <Bot size={28} />}
-                    {idx === 1 && <Car size={28} />}
-                    {idx === 2 && <PawPrint size={28} />}
-                    {idx === 3 && <Plane size={28} />}
-                    {idx > 3 && <Lightbulb size={28} />}
-                  </div>
-
-                  <h3 className="font-bold text-xl text-slate-800 group-hover:text-indigo-700 transition-colors">
-                    {idea?.name || `Creative Idea ${idx + 1}`}
-                  </h3>
+          {selectedIdea && (
+            <div className="mb-12 p-6 bg-white rounded-2xl shadow-xl border border-purple-200">
+              <div className="flex items-start gap-5">
+                <div className="p-4 rounded-xl bg-purple-100 text-purple-600">
+                  <Lightbulb size={32} />
                 </div>
-
-                {/* Optional: short description if your idea object has it */}
-                {idea?.description && (
-                  <p className="text-slate-600 mb-6 line-clamp-3 flex-grow">
-                    {idea.description}
-                  </p>
-                )}
-
-                <button
-                  onClick={() => handleSelectIdea(idea)}
-                  className="mt-auto w-full py-3.5 px-6 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all shadow-md hover:shadow-lg active:scale-[0.98] flex items-center justify-center gap-2"
-                >
-                  Build This
-                  <span className="text-lg">→</span>
-                </button>
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-800 mb-2">
+                    Selected: {selectedIdea.name || "Your Chosen Build"}
+                  </h2>
+                  {selectedIdea.description && (
+                    <p className="text-slate-600 mb-4">{selectedIdea.description}</p>
+                  )}
+                  <button
+                    onClick={() => router.push(`/build?session=${searchParams.get("session")}`)}
+                    className="px-6 py-3 bg-purple-600 text-white rounded-xl hover:bg-purple-700"
+                  >
+                    Continue Building
+                  </button>
+                </div>
               </div>
             </div>
-          ))}
+          )}
+
+          <div className="grid gap-6 sm:gap-8 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {ideas.map((idea, idx) => (
+              <div
+                key={idx}
+                className="group bg-white rounded-2xl border border-slate-200 shadow-md hover:shadow-2xl hover:border-indigo-300/60 transition-all duration-300 overflow-hidden flex flex-col h-full"
+              >
+                <div className="p-6 sm:p-7 flex flex-col flex-grow">
+                  <div className="flex items-start gap-4 mb-5">
+                    <div className="p-3 rounded-xl bg-gradient-to-br from-indigo-50 to-purple-50 text-indigo-600 group-hover:scale-110 transition-transform">
+                      {idx === 0 && <Bot size={28} />}
+                      {idx === 1 && <Car size={28} />}
+                      {idx === 2 && <PawPrint size={28} />}
+                      {idx === 3 && <Plane size={28} />}
+                      {idx > 3 && <Lightbulb size={28} />}
+                    </div>
+
+                    <h3 className="font-bold text-xl text-slate-800 group-hover:text-indigo-700 transition-colors">
+                      {idea?.name || `Creative Idea ${idx + 1}`}
+                    </h3>
+                  </div>
+
+                  {idea?.description && (
+                    <p className="text-slate-600 mb-6 line-clamp-3 flex-grow">
+                      {idea.description}
+                    </p>
+                  )}
+
+                  <button
+                    onClick={() => handleSelectIdea(idea)}
+                    className="mt-auto w-full py-3.5 px-6 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all shadow-md hover:shadow-lg active:scale-[0.98] flex items-center justify-center gap-2"
+                  >
+                    Build This
+                    <span className="text-lg">→</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
-    </main>
-    <Footer/>
+      </main>
+
+      <Footer />
     </div>
   );
 }

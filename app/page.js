@@ -124,7 +124,6 @@ export default function UploadPage() {
       if (bricksErr) console.warn("Bricks RLS warning:", bricksErr.message);
     }
 
-    // LocalStorage
     const key = `brick_session_${sessionId}`;
     localStorage.setItem(key, JSON.stringify({
       bricks,
@@ -193,7 +192,6 @@ export default function UploadPage() {
                 )}
               </div>
 
-              {/* Action buttons */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-10">
                 <label className="cursor-pointer">
                   <div className="flex items-center justify-center gap-3 py-5 px-8 bg-purple-100 hover:bg-purple-200 text-purple-900 rounded-2xl border-2 border-purple-200 font-semibold text-lg transition-all active:scale-[0.98] shadow-sm">
@@ -225,7 +223,6 @@ export default function UploadPage() {
                 </label>
               </div>
 
-              {/* Analyze button */}
               <button
                 onClick={analyzeImage}
                 disabled={!file || loading}
@@ -257,7 +254,6 @@ export default function UploadPage() {
             </div>
           </div>
 
-          {/* Error message */}
           {error && (
             <div className="mt-10 bg-red-50 border border-red-200 text-red-800 px-6 py-5 rounded-2xl flex items-center justify-center gap-3 shadow-sm">
               <AlertCircle className="h-6 w-6 flex-shrink-0" />

@@ -26,11 +26,12 @@ function BricksContent() {
       return;
     }
 
-    let dbImageUrl = null; 
+    let dbImageUrl = null;
 
     const loadSession = async () => {
       try {
         const stored = localStorage.getItem(sessionKey);
+        let localBricks = [];
         if (stored) {
           const parsed = JSON.parse(stored);
           if (Date.now() - parsed.timestamp > 2 * 60 * 60 * 1000) {
@@ -38,7 +39,8 @@ function BricksContent() {
             throw new Error("Session expired");
           }
 
-          setBricks(parsed.bricks || []);
+          localBricks = parsed.bricks || [];
+          setBricks(localBricks);
           if (parsed.uploadedImage) {
             setImageUrl(parsed.uploadedImage);
             console.log("Using localStorage base64 preview");
@@ -48,31 +50,40 @@ function BricksContent() {
         const sessionId = sessionKey.replace("brick_session_", "");
         console.log("Fetching session ID:", sessionId);
 
-        const { data: session, error: fetchError } = await supabase
+        const { data: session, error: sessionErr } = await supabase
           .from("sessions")
           .select("id, image_data, timestamp")
           .eq("id", sessionId)
           .single();
 
-        if (fetchError) throw fetchError;
-
-        console.log("DB fetch result:", {
-          hasImageData: !!session?.image_data,
-          imageSizeBytes: session?.image_data?.byteLength || 0,
-        });
+        if (sessionErr) throw sessionErr;
 
         if (session?.image_data && session.image_data.byteLength > 0) {
           const blob = new Blob([session.image_data], { type: "image/jpeg" });
           dbImageUrl = URL.createObjectURL(blob);
           setImageUrl(dbImageUrl);
-          console.log("DB blob URL created:", dbImageUrl);
-        } else {
-          console.warn("No valid image_data in DB");
+          console.log("Loaded image from DB - size:", session.image_data.byteLength);
+        }
+
+        const { data: bricksData, error: bricksErr } = await supabase
+          .from("detected_bricks")
+          .select("bricks")
+          .eq("session_id", sessionId)
+          .order("created_at", { ascending: true });
+
+        if (bricksErr) {
+          console.warn("Bricks fetch error:", bricksErr.message);
+        } else if (bricksData?.length > 0) {
+          const dbBricks = bricksData.flatMap(row => row.bricks || []);
+          if (dbBricks.length > 0) {
+            setBricks(dbBricks);
+            console.log("Loaded bricks from DB:", dbBricks.length);
+          }
         }
 
       } catch (err) {
         console.error("Session load error:", err);
-        setError("Could not load your bricks data. Please try uploading again.");
+        setError("Could not load your bricks data. Please try again.");
       } finally {
         setLoading(false);
       }
@@ -86,7 +97,7 @@ function BricksContent() {
         URL.revokeObjectURL(dbImageUrl);
       }
     };
-  }, [searchParams]); 
+  }, [searchParams]);
 
   const generateIdeas = async () => {
     if (bricks.length === 0) return;
@@ -108,7 +119,29 @@ function BricksContent() {
       const data = await res.json();
       const ideas = Array.isArray(data.ideas) ? data.ideas : [];
 
-      const sessionKey = searchParams.get("session") || `brick_session_${Date.now()}`;
+     
+      const sessionKey = searchParams.get("session");
+      const sessionId = sessionKey?.replace("brick_session_", "");
+
+      if (sessionId && ideas.length > 0) {
+        console.log("[Bricks] Saving ideas to DB...");
+
+        const { error: insertErr } = await supabase
+          .from("ideas")
+          .insert({
+            session_id: sessionId,
+            ideas: ideas,  
+          });
+
+        if (insertErr) {
+          console.error("[Bricks] Failed to save ideas:", insertErr.message);
+          setError("Ideas generated but failed to save to database.");
+        } else {
+          console.log("[Bricks] Ideas saved to DB successfully");
+        }
+      } else {
+        console.warn("[Bricks] No sessionId or no ideas — skipping DB save");
+      }
 
       const currentStored = localStorage.getItem(sessionKey);
       let sessionData = currentStored ? JSON.parse(currentStored) : {
@@ -173,7 +206,6 @@ function BricksContent() {
           </p>
         </div>
 
-        {/* Uploaded image preview */}
         <div className="mb-12 text-center">
           {imageUrl ? (
             <div className="inline-block rounded-2xl overflow-hidden shadow-2xl border-4 border-purple-100/60 bg-white">
@@ -182,8 +214,8 @@ function BricksContent() {
                 alt="Your uploaded LEGO bricks"
                 className="max-w-full h-auto max-h-[420px] object-contain transition-transform hover:scale-[1.01]"
                 onError={(e) => {
-                  console.warn("Image load failed, hiding fallback");
-                  e.target.style.display = "none"; 
+                  console.warn("Image load failed");
+                  e.target.style.display = "none";
                 }}
               />
             </div>
@@ -197,7 +229,6 @@ function BricksContent() {
           </p>
         </div>
 
-        {/* Detected bricks section */}
         <div className="bg-white rounded-3xl shadow-xl border border-slate-200/60 overflow-hidden">
           <div className="p-6 sm:p-10">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 mb-10">
